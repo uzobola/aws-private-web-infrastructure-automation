@@ -1,0 +1,32 @@
+---
+- name: Configure web servers
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Gather EC2 instance metadata
+      amazon.aws.ec2_metadata_facts:
+
+    - name: Derive the server number from the instance's Server tag
+      set_fact:
+        server_number: "{{ hostvars[inventory_hostname]['tags']['Server'] | default('unknown') }}"
+
+    - name: Install nginx
+      ansible.builtin.dnf:
+        name: nginx
+        state: present
+
+    - name: Render the web page from template
+      ansible.builtin.template:
+        src: index.html.j2
+        dest: /usr/share/nginx/html/index.html
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Enable and start nginx
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true

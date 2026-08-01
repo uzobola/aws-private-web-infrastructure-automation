@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>1% University - Challenge 3</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        text-align: center;
+        padding-top: 8%;
+        background: #0f172a;
+        color: #e2e8f0;
+        line-height: 1.6;
+      }
+      h1 {
+        font-size: 2.4rem;
+        margin-bottom: 2.5rem;
+      }
+      .meta {
+        margin: 0.8rem 0;
+        color: #94a3b8;
+        font-size: 1.05rem;
+      }
+      .tag {
+        margin-top: 3rem;
+        color: #64748b;
+        font-size: 0.85rem;
+      }
+      .prompt {
+        margin: 1.5rem 0 0.4rem 0;
+        color: #cbd5e1;
+        font-size: 1.15rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Helloooooooo, 1% University from Server {{ server_number }}!</h1>
+
+    <p class="meta">Guess where I am reaching you from?</p>
+    <p class="meta">Availability Zone: {{ ansible_ec2_placement_availability_zone }}</p>
+    <p class="meta">Instance ID: {{ ansible_ec2_instance_id }}</p>
+
+    <p class="tag">Served by nginx on a private EC2 instance, behind an Application Load Balancer.</p>
+  </body>
+</html>
