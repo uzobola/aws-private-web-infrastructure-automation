@@ -1,6 +1,26 @@
-# Challenge 3: Reproducible, Least-Exposure Web Architecture with Terraform and Ansible
+# Challenge 3: Two-AZ Private Web Architecture on AWS
 
-A "Hello, World!" page is served by nginx on a private EC2 instance, behind an Application Load Balancer, across two Availability Zones. The application is trivial on purpose. The delivery pattern is the point: reproducible infrastructure as code, least exposure by default, and no standing credentials anywhere in the path.
+> A web page served by nginx on a **private** EC2 instance, behind an Application Load Balancer, across **two Availability Zones**. Provisioned with Terraform, configured with Ansible over AWS Systems Manager (no SSH). 
+
+**Tech stack:** Terraform · Ansible · AWS (VPC, EC2, ALB, S3, IAM, NAT, SSM) · nginx
+
+---
+
+## The problem this solves
+
+**Business problem.** A company needs an application the public can reach, while four things stay true at once: it must be *reachable* but its servers must not be *exposed*; it must *survive the loss of a data center*; it must be *reproducible and auditable* rather than hand-built; and it must be *provably secure before it ships*. Each of those failing is a business cost: a breach, an outage, an unrecoverable snowflake, or a failed audit.
+
+**Technical problem.** Translate those requirements into infrastructure:
+
+| Requirement | Solution |
+| --- | --- |
+| Reachable but not exposed | Private EC2 behind a public Application Load Balancer |
+| Survive a data-center failure | Resources spread across two Availability Zones |
+| Reproducible and auditable | All infrastructure as Terraform; all configuration as Ansible |
+| No standing credentials on servers | EC2 reads S3 through a scoped IAM role, never a stored key |
+| Administered without new attack surface | Access via SSM Session Manager (no SSH, no port 22, no bastion) |
+
+---
 
 ## Architecture
 
@@ -10,119 +30,145 @@ Internet
 Internet Gateway
    |
 +---------------------- VPC (10.0.0.0/16) ----------------------+
-|  PUBLIC subnets  (AZ-a, AZ-b)                                 |
-|    - Application Load Balancer                                |
+|                                                               |
+|  PUBLIC subnets   (AZ-a, AZ-b)                                |
+|    - Application Load Balancer  (only public entry point)     |
 |    - NAT Gateway                                              |
-|                                                              |
-|  PRIVATE subnets (AZ-a, AZ-b)                                 |
-|    - EC2 running nginx  (no public IP)                        |
-+--------------------------------------------------------------+
+|                                                               |
+|  PRIVATE subnets  (AZ-a, AZ-b)                                |
+|    - EC2 running nginx   (no public IP)                       |
+|                                                               |
++---------------------------------------------------------------+
 ```
 
-Request flow: visitor -> Internet Gateway -> ALB (public subnet) -> EC2 (private subnet) on port 80.
-Outbound from the instance: EC2 -> NAT Gateway -> internet, for package installation only.
-S3 access: EC2 -> S3 Gateway VPC Endpoint -> bucket, without traversing the NAT.
+- **Request flow:** visitor → Internet Gateway → ALB (public subnet) → EC2 (private subnet) on port 80
+- **Outbound:** EC2 → NAT Gateway → internet, for package installation only
+- **S3 access:** EC2 → S3 Gateway VPC Endpoint → bucket, without traversing the NAT
 
-<!-- TODO: replace ASCII with an exported diagram image before submission -->
+<!-- Before final submission: replace this ASCII diagram with an exported image. -->
 
-## Design decisions and security posture
+---
 
-This section is the reason the architecture looks the way it does. Each choice is a deliberate tradeoff, not a default.
+# Part 1 — Required documentation
 
-### The web server is private, and the URL is the load balancer
+## 1. Setting up the environment
 
-The challenge asks for "the URL of the web page hosted on the EC2 instance." The instance is deliberately placed in a private subnet with no public IP address. It cannot be reached directly from the internet. Public traffic terminates at the Application Load Balancer, which routes to the instance over the VPC's internal network.
+### Tools
 
-The URL provided for evaluation is therefore the load balancer's DNS name, not the instance's. This is an intentional deviation from the literal wording, in favor of the production-correct pattern: never expose compute directly. The page is served by the instance and reached through the load balancer.
-
-### What this architecture makes impossible
-
-Verifiable statements, each testable in one or two commands:
-
-- The web server has no public IP and cannot be reached directly from the internet.
-- The S3 bucket cannot be made public; public access is blocked at the account-override level.
-- The EC2 instance holds no static AWS credentials; it reads S3 through a scoped instance role.
-- No access keys appear anywhere in the Terraform code.
-- Terraform authenticates with short-lived, MFA-gated credentials obtained by assuming a role.
-- No port 22 is open anywhere; there is no SSH and no key pair. Administrative and configuration access is via AWS Systems Manager Session Manager only.
-- The instances enforce IMDSv2 (`http_tokens = "required"`), closing the metadata-service credential-theft vector.
-- The instance security group accepts traffic only from the load balancer's security group, not from any IP range, so there is no network path to the instances except through the ALB.
-
-### S3 bucket hardening
-
-The bucket that holds the web content is hardened rather than merely created:
-
-- **Block Public Access (all four controls):** the bucket cannot be made public through ACLs or bucket policy, on current or future grants. It serves the instance through an IAM role, never the public.
-- **Ownership set to BucketOwnerEnforced:** ACLs are disabled entirely, removing a legacy misconfiguration vector. Access is governed only by IAM and bucket policy.
-- **Versioning enabled:** protects against accidental overwrite or deletion and preserves a provable object history. (Production would add a lifecycle rule to expire old versions; omitted here as a documented tradeoff.)
-- **Server-side encryption at rest (AES256 / SSE-S3):** declared explicitly to document intent and satisfy scanners, even though S3 encrypts by default. (A customer-managed KMS key would add key rotation, a key access policy, and CloudTrail on decrypt, at ~1 USD/month; deferred as a documented tradeoff.)
-
-### Credential handling
-
-Terraform never holds long-lived credentials. A scoped IAM user (`grc-engineer01`) is permitted only to assume a dedicated execution role, and only with MFA present, enforced by an `aws:MultiFactorAuthPresent` condition in the role's trust policy. `aws-vault` stores the source key in the OS credential manager (not a plaintext file) and mints short-lived session credentials per command. The Terraform provider block contains no `access_key` or `secret_key`.
-
-Full setup steps are in [aws-role-assumption-setup-guide.md](./aws-role-assumption-setup-guide.md).
-
-### IAM instance role (least privilege)
-
-The instances read the web content from S3 through an IAM role attached as an instance profile, never through a stored access key. The role's permission policy grants `s3:GetObject` on a single object ARN (`<bucket>/index.html`), not the bucket, not all objects, not all buckets. If an instance were fully compromised, the identity it carries can read one HTML file and nothing else. This is non-human identity governance expressed in infrastructure: a scoped role, no standing secret, minimal access. The role additionally carries the AWS-managed `AmazonSSMManagedInstanceCore` policy so the instance can be managed over Session Manager. That managed policy is a deliberate, documented exception to hand-scoping, since it is AWS's own minimal SSM policy.
-
-### Security group chain
-
-Two security groups enforce least exposure as a pair:
-
-- The ALB security group allows inbound port 80 from `0.0.0.0/0`. This is intentional; the load balancer is the one component meant to be public.
-- The instance security group allows inbound port 80 only from the ALB's security group (a security-group reference, not an IP range). Nothing else in the VPC, and nothing on the internet, has a network path to the instances. The exposure lives entirely at the ALB by design.
-
-## Prerequisites
-
-Tools required on the workstation:
-
-- AWS CLI v2
-- Terraform >= 1.5
-- aws-vault (maintained fork, v7.x) for running Terraform on short-lived credentials
+| Tool | Where it runs | Purpose |
+| --- | --- | --- |
+| AWS CLI v2 | Windows and Linux | AWS API access |
+| Terraform >= 1.5 | Any Windows terminal (or Linux/macOS) | Provision infrastructure |
+| aws-vault (v7.x) | Same terminal as Terraform | Short-lived credentials for Terraform |
+| Ansible | Any Linux shell (WSL on Windows) | Configure the instances |
+| session-manager-plugin | Same shell as Ansible | Agentless SSM connection |
 
 ### Two shells, on purpose
 
-Terraform has a native Windows binary and is run from a Windows shell (Git Bash) via aws-vault. Ansible is a Linux-native tool and does not run natively on Windows at all. It runs from a Linux control node.
+Terraform has a native Windows binary and runs from any terminal. Ansible is Linux-native and does not run on Windows at all; it runs from a Linux shell.
 
-- On **Windows**: run the Ansible steps from **WSL** (Windows Subsystem for Linux), not Git Bash. Git Bash cannot run Ansible.
-- On **macOS or Linux**: run the Ansible steps directly in your terminal.
+- **On Windows:** run Terraform from **any terminal** (Git Bash, PowerShell, or Windows Terminal), with aws-vault providing credentials. Run Ansible from **WSL or any Linux shell**.
+- **On macOS or Linux:** run both directly in your terminal.
 
-This split is the portable, reproducible setup: "run Ansible from a Linux shell" is correct on every operating system.
+The real requirement is not a specific shell but the split itself: Terraform needs aws-vault for credentials; Ansible needs a Linux environment. 
 
-### Setting up the Linux control node (Ansible)
 
-From WSL (or a native Linux/macOS terminal), install the toolchain:
+### AWS authentication
 
-```
+Terraform never holds a long-lived key. A scoped IAM user is allowed only to assume a Terraform execution role, and only with MFA. The full, reproducible credential setup is documented separately:
+
+> **See [`aws-role-assumption-setup-guide.md`](./aws-role-assumption-setup-guide.md)** for the complete IAM role, MFA, and aws-vault configuration.
+
+### Installing the Linux toolchain (Ansible)
+
+Run once, from WSL or a native Linux/macOS terminal:
+
+```bash
 sudo apt update
 sudo apt install -y ansible python3-pip unzip
 
-# AWS CLI v2 (Linux copy, separate from any Windows install)
+# AWS CLI v2 (Linux copy)
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip -q awscliv2.zip && sudo ./aws/install && rm -rf awscliv2.zip aws/
 
-# SSM Session Manager plugin (for the agentless SSM connection)
-curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "session-manager-plugin.deb"
-sudo dpkg -i session-manager-plugin.deb && rm session-manager-plugin.deb
+# SSM Session Manager plugin
+curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "smp.deb"
+sudo dpkg -i smp.deb && rm smp.deb
 
 # Ansible AWS collections and Python SDK
 ansible-galaxy collection install community.aws amazon.aws
 pip3 install boto3 botocore --break-system-packages
 ```
 
-### AWS authentication
+---
 
-- An IAM user scoped to assume a Terraform execution role, with MFA enforced in the role's trust policy (see the setup guide above).
-- The `terraform` profile configured in `~/.aws/config`. On Windows this is used by aws-vault; in WSL the same profile is configured natively so Ansible's dynamic inventory can authenticate. Full details are in the credential setup guide.
+## 2. Deploying the infrastructure and configuration
 
-## Repository structure
+Deployment is two stages: Terraform provisions, then Ansible configures.
+
+### Stage 1 — Provision (Terraform)
+
+From the `terraform/` directory, using aws-vault (which handles the assume-role and MFA prompt):
+
+```bash
+cd terraform
+aws-vault exec terraform -- terraform init
+aws-vault exec terraform -- terraform plan
+aws-vault exec terraform -- terraform apply
+```
+
+`apply` prints the outputs, including `alb_dns_name`, the site's URL.
+
+> **Cost note:** the NAT Gateway and ALB bill hourly from `apply`. 
+
+### Stage 2 — Configure (Ansible)
+
+From the `ansible/` directory, in a Linux shell (WSL or native):
+
+```bash
+cd ansible
+
+# On the Windows mount only: the directory is world-writable, so point Ansible at the config explicitly
+export ANSIBLE_CONFIG=$(pwd)/ansible.cfg
+
+# Load short-lived credentials into the shell (Ansible cannot answer the MFA prompt itself)
+aws sts get-caller-identity --profile terraform
+eval $(aws configure export-credentials --profile terraform --format env)
+
+# Confirm discovery and connectivity, then configure
+ansible-inventory --graph        # lists both instances under server_1 / server_2
+ansible all -m ping              # returns "pong" from each instance over SSM
+ansible-playbook playbook.yml    # installs nginx, renders the page, starts the service
+```
+
+Once nginx serves HTTP 200, the ALB health check passes and the site goes live.
+
+### Accessing the page
+
+The live URL is the `alb_dns_name` output (HTTP only). The ALB DNS name is regenerated on every rebuild, so the URL submitted for grading is taken from the final `apply` before submission.
+
+Each server reports its real Availability Zone and instance ID, so the load balancer distributing traffic across both AZs is visible live:
+
+```bash
+for i in $(seq 1 10); do curl -s http://<alb_dns_name> | grep -E "Server|Zone"; echo "---"; done
+```
+
+### Teardown
+
+```bash
+aws-vault exec terraform -- terraform destroy
+```
+
+Everything is Terraform-managed, so teardown is clean. `index.html` is re-uploaded from the local `files/` directory on the next `apply`; the repository, not the running bucket, is the source of truth.
+
+---
+
+## 3. Explanation of the code
+
+### Repository structure
 
 ```
-challenge-3-terraform-ansible/
-├── README.md
-├── .gitignore
+.
 ├── terraform/
 │   ├── provider.tf          # provider, version constraints, default tags
 │   ├── variables.tf         # region, project name, VPC CIDR, environment
@@ -133,6 +179,7 @@ challenge-3-terraform-ansible/
 │   ├── endpoints.tf         # S3 gateway VPC endpoint
 │   ├── alb.tf               # load balancer, target group, listener
 │   ├── ec2.tf               # two private instances (one per AZ)
+│   ├── security-baseline.tf # flow logs + default-SG lockdown (staged, see scanning)
 │   ├── outputs.tf
 │   └── files/index.html
 └── ansible/
@@ -142,130 +189,115 @@ challenge-3-terraform-ansible/
     └── templates/index.html.j2
 ```
 
-## Deploying the infrastructure
-
-All Terraform commands run through aws-vault, which handles the assume-role and MFA prompt:
-
-```
-cd terraform
-aws-vault exec terraform -- terraform init
-aws-vault exec terraform -- terraform plan
-aws-vault exec terraform -- terraform apply
-```
-
-`apply` prints the outputs, including the load balancer DNS name used to reach the site.
-
-Note: the NAT Gateway and ALB begin billing on `apply` and run hourly. This project is destroyed between work sessions and rebuilt with a single `apply`, so nothing accrues overnight.
-
-## Configuring the instance
-
-Ansible runs from the Linux control node (WSL on Windows). It connects to the instances over AWS Systems Manager Session Manager, not SSH: no bastion, no key pair, no open port 22. The instances are discovered dynamically by tag, so nothing is hardcoded and the same commands work after any rebuild.
-
-Load short-lived credentials into the shell (Ansible cannot answer the MFA prompt itself, so the session is obtained once and exported):
-
-```
-cd ansible
-export ANSIBLE_CONFIG=$(pwd)/ansible.cfg   # only needed on the Windows mount (world-writable dir)
-aws sts get-caller-identity --profile terraform
-eval $(aws configure export-credentials --profile terraform --format env)
-```
-
-Confirm discovery and connectivity, then run the playbook:
-
-```
-ansible-inventory --graph      # should list both instances under server_1 and server_2
-ansible all -m ping            # should return "pong" from each instance over SSM
-ansible-playbook playbook.yml
-```
-
-The playbook installs nginx, renders the page from a Jinja2 template, and starts the service. Once nginx serves HTTP 200, the ALB health check passes and traffic flows.
-
-## Accessing the web page
-
-The live URL is the ALB DNS name, printed as the `alb_dns_name` output after `terraform apply`:
-
-```
-Live URL:  http://<alb_dns_name>          (http only; see HTTPS note in scanning triage)
-```
-
-Note: the ALB DNS name is regenerated on every rebuild, so the URL changes each time the stack is destroyed and re-applied. The URL submitted for evaluation is taken from the final `apply` performed immediately before submission.
-
-The page reports each server's real Availability Zone and instance ID, read from live instance metadata, so refreshing across requests demonstrates the load balancer distributing traffic across both AZs. To observe the distribution reliably (browsers reuse connections and appear to stick to one server), use fresh connections:
-
-```
-for i in $(seq 1 10); do curl -s http://<alb_dns_name> | grep -E "Server|Zone"; echo "---"; done
-```
-
-## Explanation of the code
-
 ### Terraform
 
-- **Networking (`vpc.tf`):** a /16 VPC with two public and two private subnets across two AZs. Public subnets route to the Internet Gateway; private subnets route outbound through a single NAT Gateway. Route tables are what actually enforce the public/private distinction.
-- **Storage (`s3.tf`):** a uniquely named bucket (suffixed with the account ID for global uniqueness), hardened as described above, holding `index.html`.
-- **Identity (`iam.tf`):** the instance role and profile, scoped to read a single S3 object, plus the managed SSM policy. Trust policy and permission policy are separate concerns (who may assume vs. what the role may do).
-- **Security groups (`security-group.tf`):** the ALB SG (public on 80) and the instance SG (trusts only the ALB SG). The one-directional reference avoids a Terraform dependency cycle.
-- **Endpoint (`endpoints.tf`):** an S3 Gateway VPC endpoint associated with the private route table, so S3 traffic stays on the AWS network and does not traverse the NAT.
-- **Load balancer (`alb.tf`):** the internet-facing ALB across both public subnets, a target group with an HTTP health check on `/`, and a listener forwarding port 80 to the group.
-- **Compute (`ec2.tf`):** two instances (`count = 2`), one per private subnet so one per AZ, each with the instance profile, no public IP, IMDSv2 required, and an encrypted root volume. The AMI is looked up (latest Amazon Linux 2023) rather than hardcoded. Both register into the ALB target group.
+| File | What it provisions |
+| --- | --- |
+| `vpc.tf` | A /16 VPC, two public and two private subnets across two AZs, IGW, a single NAT Gateway, and route tables. Route tables are what actually enforce the public/private split. |
+| `s3.tf` | A uniquely named bucket (account-ID suffix for global uniqueness), hardened (see security notes), holding `index.html`. |
+| `iam.tf` | The instance role and profile, scoped to read a single S3 object, plus the managed SSM policy. Trust policy (who may assume) and permission policy (what it may do) are separate. |
+| `security-group.tf` | The ALB SG (public on 80) and the instance SG, which trusts only the ALB SG. |
+| `endpoints.tf` | An S3 Gateway VPC endpoint on the private route table, keeping S3 traffic off the NAT and off the internet. |
+| `alb.tf` | Internet-facing ALB across both public subnets, a target group with an HTTP health check, and a listener forwarding port 80. |
+| `ec2.tf` | Two instances (one per private subnet, so one per AZ), each with the instance profile, no public IP, IMDSv2 required, and an encrypted root volume. The AMI is looked up (latest Amazon Linux 2023), not hardcoded. |
 
 ### Ansible
 
-- **Dynamic inventory (`aws_ec2.yml`):** the `amazon.aws.aws_ec2` plugin queries EC2 at runtime, filtering on `tag:Project = challenge3` and running state, so instances are discovered by tag rather than by hardcoded IP. The `compose` block sets each host to connect via the `aws_ssm` connection, and `keyed_groups` builds `server_1` / `server_2` groups from the `Server` tag.
-- **Playbook (`playbook.yml`):** gathers each instance's EC2 metadata, derives the server number from its tag (stored in a clean variable to avoid Ansible's reserved `tags` name), installs nginx via `dnf`, renders `templates/index.html.j2` per host, and enables and starts the service.
-- **Template (`templates/index.html.j2`):** shared branding plus each host's real Availability Zone and instance ID, pulled from live metadata so the values cannot be faked. Shared content is common; per-host identity is injected by configuration management.
+| File | What it does |
+| --- | --- |
+| `aws_ec2.yml` | Dynamic inventory: the `amazon.aws.aws_ec2` plugin discovers instances by `tag:Project`, connects over `aws_ssm`, and builds `server_1` / `server_2` groups from the `Server` tag. Nothing is hardcoded, so it survives rebuilds. |
+| `playbook.yml` | Gathers each instance's metadata, derives its server number from its tag, installs nginx via `dnf`, renders the page template per host, and starts the service. |
+| `templates/index.html.j2` | Shared branding plus each host's real AZ and instance ID, pulled from live metadata so the values cannot be faked. |
+
+---
+
+# Part 2 — Additions
+
+Everything below is engineering added on top of the stated requirements: the security posture, the verifiable guarantees, and the infrastructure-as-code security scan. This is where the design choices are justified.
+
+## Design decisions and security posture
+
+Each choice is a deliberate tradeoff, not a default.
+
+### Why two instances
+
+The brief asked for a single EC2 instance. This deployment runs two, one in each Availability Zone, as a deliberate application of the AWS Well-Architected Framework:
+
+- **Reliability (primary):** a single instance in a single AZ is a single point of failure. Two instances across two AZs keep the site serving through a full AZ outage. High availability is the main reason for the second instance.
+- **Performance Efficiency (secondary):** the ALB distributes requests across both instances rather than concentrating load on one.
+- **Operational Excellence (secondary):** with two instances, the load balancer's health checking and cross-AZ distribution are observable and testable. The page reports each server's real AZ, making the HA behavior visible rather than assumed.
+- **Cost Optimization (the tradeoff):** two instances cost more than one. This is a conscious trade of marginal cost for reliability, which is itself how Well-Architected decisions are meant to be made, balancing pillars rather than maximizing one.
+
+### The web server is private; the URL is the load balancer
+
+The brief asks for "the URL of the web page hosted on the EC2 instance." The instance is deliberately placed in a private subnet with no public IP and cannot be reached directly. Public traffic terminates at the ALB, which routes to the instance internally. The URL provided for grading is therefore the load balancer's DNS name. This is an intentional deviation from the literal wording in favor of the production-correct pattern: never expose compute directly.
+
+## Security Considerations
+
+### S3 bucket hardening
+
+- **Block Public Access (all four controls):** the bucket cannot be made public through ACLs or policy, on current or future grants.
+- **Ownership BucketOwnerEnforced:** ACLs disabled entirely, removing a legacy misconfiguration vector.
+- **Versioning enabled:** protects against accidental overwrite or deletion and preserves object history.
+- **Server-side encryption (AES256):** declared explicitly to document intent and satisfy scanners.
+
+### IAM instance role (least privilege)
+
+The instances read from S3 through an IAM role attached as an instance profile, never a stored key. The permission policy grants `s3:GetObject` on a *single object ARN*, not the bucket, not all objects, not all buckets. A fully compromised instance can read one HTML file and nothing else. The role also carries the AWS-managed `AmazonSSMManagedInstanceCore` policy for Session Manager access, a deliberate, documented use of a managed policy.
+
+### Security group chain
+
+- The **ALB SG** allows inbound 80 from `0.0.0.0/0`; the load balancer is meant to be public.
+- The **instance SG** allows inbound 80 *only from the ALB's security group* (a reference, not an IP range). Nothing else in the VPC, and nothing on the internet, has a path to the instances.
+
+### What this architecture makes impossible
+
+Each statement is verifiable in one or two commands:
+
+> - The web server has no public IP and cannot be reached directly from the internet.
+> - The S3 bucket cannot be made public; public access is blocked at the account-override level.
+> - The EC2 instances hold no static AWS credentials; they read S3 through a scoped role.
+> - No access keys appear anywhere in the Terraform code.
+> - No port 22 is open anywhere; there is no SSH and no key pair. Access is via SSM only.
+> - The instances enforce IMDSv2, closing the metadata-service credential-theft vector.
+
+---
 
 ## IaC security scanning
 
-The Terraform was scanned with Checkov, a policy-as-code tool that checks infrastructure against CIS, NIST, and other frameworks. The point of the exercise is not a clean scan (a zero-findings result on infrastructure this size usually means the tool is not looking hard enough) but documented judgment: every finding is triaged into fix-worthy or accept-with-rationale.
+The Terraform was scanned with **Checkov** (policy-as-code against CIS, NIST, and other frameworks). The goal is not a clean scan; on infrastructure this size, zero findings usually means the tool is not looking hard enough. The goal is documented judgment: every finding is triaged.
 
-```
+```bash
 python3 -m checkov -d terraform/ --compact --quiet
 ```
 
-**Result: 76 passed, 24 failed.** The 76 passes independently confirm the hardening built into this project: the S3 public-access block, encryption, IMDSv2 enforcement, the scoped instance role, the security-group chain, and encrypted volumes are all detected and validated. The Ansible scan passed with no failures.
+**Result: 76 passed, 24 failed.** The 76 passes independently confirm the hardening built into this project (public-access block, encryption, IMDSv2, scoped IAM, the SG chain, encrypted volumes). The Ansible scan passed with no failures.
 
-The 24 failures are triaged below.
+### Findings triage
 
-### Fix-worthy (remediation staged)
+| Finding(s) | Decision | Rationale |
+| --- | --- | --- |
+| `CKV2_AWS_11` VPC flow logs | **Fix (staged)** | Network audit/IR record. Terraform written in `security-baseline.tf`, not yet applied. |
+| `CKV2_AWS_12` default SG not restricted | **Fix (staged)** | Lock the unused default SG to deny-all. |
+| `CKV_AWS_91`, `CKV_AWS_18` access logging | **Fix (staged)** | ALB and S3 access logs; needs a logging bucket. |
+| `CKV_AWS_2`, `_103`, `_131`, `_378`, `CKV2_AWS_20` (HTTPS/TLS) | **Accept** | HTTP-only: no registered domain in a lab. Production terminates TLS at the ALB with an ACM cert. |
+| `CKV_AWS_145` S3 KMS encryption | **Accept** | SSE-S3 used; customer-managed KMS deferred as a cost tradeoff. |
+| `CKV_AWS_150` ALB deletion protection | **Accept** | Off intentionally; the lab is destroyed nightly and this would block teardown. |
+| `CKV_AWS_260` ingress 0.0.0.0/0 to 80 | **Accept** | Fires on the ALB SG, the intended public entry point. |
+| `CKV_AWS_130` public IP on subnets | **Accept** | Fires on public subnets, which need it for the ALB/NAT. Private subnets do not. |
+| `CKV_AWS_382` egress 0.0.0.0/0 | **Accept** | Instances need outbound for package installation via NAT. |
+| `CKV_AWS_144`, `CKV2_AWS_62`, `CKV2_AWS_61`, `CKV_AWS_126`, `CKV_AWS_135`, `CKV2_AWS_28` | **Accept** | Enterprise-scale controls (cross-region replication, event notifications, lifecycle, detailed monitoring, EBS optimization, WAF) beyond a single-region lab. |
 
-These are legitimate gaps worth closing. The Terraform for them is staged for a follow-up commit and not yet applied at the time of this submission.
+This triage, 76 controls validated and 24 findings sorted into fix-now versus accept-with-rationale, is the governance record for the infrastructure: risk is either remediated or consciously accepted with a documented reason, never silently ignored.
 
-- `CKV2_AWS_11` VPC Flow Logs not enabled. The highest-value finding: flow logs are the network audit and incident-response record. Remediation: a CloudWatch log group, a scoped flow-logs IAM role, and an `aws_flow_log` capturing ALL traffic.
-- `CKV2_AWS_12` default security group not restricted. Remediation: adopt the VPC's default SG in Terraform and strip it to deny-all.
-- `CKV_AWS_91` / `CKV_AWS_18` ALB and S3 access logging not enabled. Remediation: a logging bucket plus access-log configuration on both.
-
-### Accepted: deliberate lab tradeoffs (documented)
-
-- `CKV_AWS_2`, `CKV_AWS_103`, `CKV2_AWS_20`, `CKV_AWS_378`, `CKV_AWS_131` (ALB should use HTTPS / TLS 1.2 / redirect HTTP / drop HTTP headers): all downstream of serving HTTP only. HTTPS requires a registered domain and a TLS certificate, out of scope for this lab. Production terminates TLS at the ALB with an ACM certificate.
-- `CKV_AWS_145` S3 not encrypted with a KMS key: SSE-S3 (AES256) is used instead. A customer-managed KMS key adds rotation, a key policy, and CloudTrail on decrypt, deferred as a cost tradeoff.
-- `CKV_AWS_150` ALB deletion protection disabled: intentionally off, because the lab is destroyed and rebuilt between sessions and deletion protection would block teardown. Production would enable it.
-
-### Accepted: fires on intended design
-
-- `CKV_AWS_260` ingress from `0.0.0.0/0` to port 80: fires on the ALB security group, which is the intended public entry point. The instances behind it are not internet-reachable.
-- `CKV_AWS_130` subnets assign public IP by default: fires on the public subnets, which legitimately need this for the ALB and NAT. Private subnets, where the workloads run, do not assign public IPs.
-- `CKV_AWS_382` egress to `0.0.0.0/0`: the instances need outbound access for package installation via the NAT.
-
-### Accepted: enterprise-scale controls beyond this lab's scope
-
-- `CKV_AWS_144` S3 cross-region replication (DR for critical data), `CKV2_AWS_62` S3 event notifications, `CKV2_AWS_61` S3 lifecycle policy, `CKV_AWS_126` EC2 detailed monitoring, `CKV_AWS_135` EBS optimization, `CKV2_AWS_28` WAF on the ALB. Each is a real production control but unnecessary or cost-adding for a single-region Hello World lab. Production would revisit WAF and lifecycle in particular.
-
-This triage (76 controls validated, 24 findings sorted into fix-now versus accept-with-rationale) is the governance record for the infrastructure, analogous to an exception register: risk is either remediated or consciously accepted with a documented reason, never silently ignored.
-
-## Teardown
-
-To avoid ongoing charges (the NAT Gateway and ALB bill hourly):
-
-```
-aws-vault exec terraform -- terraform destroy
-```
-
-All resources are Terraform-managed, so `destroy` removes everything cleanly, including the S3 bucket and its object. The `index.html` is re-uploaded from the local `files/` directory on the next `apply`, so the source of truth is the repository, not the running bucket.
+---
 
 ## Cost and tradeoffs
 
-- Single NAT Gateway rather than one per AZ: a cost-versus-availability tradeoff; production would run one per AZ.
-- AES256 encryption rather than a customer-managed KMS key: a cost-versus-control tradeoff.
-- S3 versioning without a lifecycle expiry rule: acceptable for a lab, would be added in production.
-- HTTP only (no TLS): the lab has no registered domain; production terminates HTTPS at the ALB with an ACM certificate.
-- Several fix-worthy scanner findings (flow logs, default SG lockdown, access logging) are staged for a follow-up rather than applied at submission time.
+| Choice | Tradeoff |
+| --- | --- |
+| Single NAT Gateway | Cost vs. availability; production runs one per AZ. |
+| AES256 (SSE-S3) not KMS | Cost vs. key control. |
+| Versioning without lifecycle expiry | Fine for a lab; production adds an expiry rule. |
+| HTTP only, no TLS | No registered domain; production terminates HTTPS at the ALB. |
+| Some scanner findings staged, not applied | Flow logs, default-SG lockdown, access logging queued for a follow-up. |
