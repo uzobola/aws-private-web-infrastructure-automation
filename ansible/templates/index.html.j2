@@ -36,8 +36,8 @@
     <h1>Helloooooooo, 1% University from Server {{ server_number }}!</h1>
 
     <p class="meta">Guess where I am reaching you from?</p>
-    <p class="meta">Availability Zone: {{ ansible_ec2_placement_availability_zone }}</p>
-    <p class="meta">Instance ID: {{ ansible_ec2_instance_id }}</p>
+    <p class="meta">Availability Zone: {{ ansible_facts["ec2_placement_availability_zone"] }}</p>
+    <p class="meta">Instance ID: {{ ansible_facts["ec2_instance_id"] }}</p>
 
     <p class="tag">Served by nginx on a private EC2 instance, behind an Application Load Balancer.</p>
   </body>

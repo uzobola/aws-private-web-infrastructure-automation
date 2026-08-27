@@ -28,3 +28,18 @@ crash.*.log
 *.pem
 *.key
 
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local scan output
+checkov-results.txt
+checkov-final-results.txt

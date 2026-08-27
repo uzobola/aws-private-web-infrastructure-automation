@@ -8,14 +8,31 @@ resource "aws_cloudwatch_log_group" "vpc_flow" {
   tags              = { Name = "${var.project_name}-flow-logs" }
 }
 
-# Trust policy: allow the VPC Flow Logs service to assume the role
+
+# Trust policy: allow VPC Flow Logs to assume this role
+# only when acting on behalf of this AWS account.
 data "aws_iam_policy_document" "flow_logs_assume" {
   statement {
     effect  = "Allow"
     actions = ["sts:AssumeRole"]
+
     principals {
       type        = "Service"
       identifiers = ["vpc-flow-logs.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values = [
+        "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:vpc-flow-log/*"
+      ]
     }
   }
 }
@@ -27,15 +44,33 @@ resource "aws_iam_role" "flow_logs" {
 
 # Permission policy: allow writing log events to CloudWatch
 data "aws_iam_policy_document" "flow_logs_write" {
+
+  # Write flow-log data to this project's CloudWatch log streams.
   statement {
+    sid    = "WriteVpcFlowLogs"
     effect = "Allow"
+
     actions = [
       "logs:CreateLogStream",
       "logs:PutLogEvents",
-      "logs:DescribeLogGroups",
       "logs:DescribeLogStreams",
     ]
-    resources = ["${aws_cloudwatch_log_group.vpc_flow.arn}:*"]
+
+    resources = [
+      "${aws_cloudwatch_log_group.vpc_flow.arn}:*"
+    ]
+  }
+
+  # DescribeLogGroups does not support resource-level IAM scoping.
+  statement {
+    sid    = "DescribeLogGroups"
+    effect = "Allow"
+
+    actions = [
+      "logs:DescribeLogGroups"
+    ]
+
+    resources = ["*"]
   }
 }
 

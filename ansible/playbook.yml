@@ -9,8 +9,8 @@
       amazon.aws.ec2_metadata_facts:
 
     - name: Derive the server number from the instance's Server tag
-      set_fact:
-        server_number: "{{ hostvars[inventory_hostname]['tags']['Server'] | default('unknown') }}"
+      ansible.builtin.set_fact:
+        server_number: "{{ hostvars[inventory_hostname]['ec2_tags']['Server'] | default('unknown') }}"
 
     - name: Install nginx
       ansible.builtin.dnf:

@@ -1,10 +1,13 @@
 # Current account identity, used to make the bucket name globally unique
 data "aws_caller_identity" "current" {}
 
-# This bucket holds the web content
+# Ansible/SSM staging bucket for temporary module and file transfer.
+# It is not the source of the webpage.
 resource "aws_s3_bucket" "web" {
-  bucket = "${var.project_name}-web-${data.aws_caller_identity.current.account_id}"
-  tags   = { Name = "${var.project_name}-web" }
+  bucket        = "${var.project_name}-web-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true
+
+  tags = { Name = "${var.project_name}-web" }
 }
 
 # Ownership controls set to BucketOwnerEnforced - Disables ACLs entirely so that
@@ -25,11 +28,11 @@ resource "aws_s3_bucket_public_access_block" "web" {
   restrict_public_buckets = true
 }
 
-# Versioning - Keeps every version of an object
+# Versioning suspended so leftover Ansible payloads cannot persist as old versions.
 resource "aws_s3_bucket_versioning" "web" {
   bucket = aws_s3_bucket.web.id
   versioning_configuration {
-    status = "Enabled"
+    status = "Suspended"
   }
 }
 
@@ -43,15 +46,22 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "web" {
   }
 }
 
-# Upload the Hello World page into the bucket. 
-# Hashes the file, so if index.html is edited later, Terraform notices the hash changed and re-uploads it. 
-# Without it, Terraform wouldn't detect content changes.
-resource "aws_s3_object" "index" {
-  bucket       = aws_s3_bucket.web.id
-  key          = "index.html"
-  source       = "${path.module}/files/index.html"
-  content_type = "text/html"
-  etag         = filemd5("${path.module}/files/index.html")
+# Expire transfer objects after one day so the bucket does not retain playbook payloads.
+resource "aws_s3_bucket_lifecycle_configuration" "web" {
+  bucket = aws_s3_bucket.web.id
 
-  depends_on = [aws_s3_bucket_versioning.web]
+  rule {
+    id     = "expire-ansible-transfer-objects"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = 1
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
+    }
+  }
 }

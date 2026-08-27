@@ -22,6 +22,7 @@ resource "aws_instance" "web" {
   vpc_security_group_ids      = [aws_security_group.ec2.id]
   iam_instance_profile        = aws_iam_instance_profile.web_instance.name
   associate_public_ip_address = false
+  monitoring                  = true
 
   metadata_options {
     http_tokens   = "required"
