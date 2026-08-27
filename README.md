@@ -1,8 +1,10 @@
-# Tech Challenge 3 — Terraform + Ansible AWS Web Architecture
+# Private Multi-AZ AWS Web Infrastructure Automation
 
-A two-AZ AWS web architecture provisioned with Terraform and configured with Ansible over AWS Systems Manager.
+Public ALB, private EC2 compute, Terraform provisioning, Ansible configuration, and SSM-based administration.
 
-The application runs on private EC2 instances with no public IP addresses. Internet traffic enters through an Application Load Balancer. Terraform owns the cloud infrastructure; Ansible discovers the EC2 instances dynamically and configures nginx through SSM without SSH.
+A security-focused AWS infrastructure project that deploys a public web entry point over a private, two-AZ compute tier. Terraform provisions the AWS infrastructure, while Ansible dynamically discovers and configures the EC2 instances through AWS Systems Manager without SSH.
+
+The design separates infrastructure, configuration, workload, and AWS service identities, and validates least privilege through both successful and deliberately denied operations.
 
 ## What This Project Demonstrates
 

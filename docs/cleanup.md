@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Cleanup is part of the Tech Challenge 3 resource lifecycle.
+Cleanup is part of the project resource lifecycle.
 
 The teardown process removes AWS infrastructure, validates removal of billable resources, records teardown evidence, and reviews local project-specific authentication configuration.
 
@@ -174,7 +174,7 @@ The expected result after teardown is `NoSuchEntity`.
 
 Check the EC2 workload role using the deployed Terraform role name if needed.
 
-Do not remove the shared Terraform execution role if it predates this project and is used outside Tech Challenge 3.
+Do not remove the shared Terraform execution role if it predates this project and is used outside of the project.
 
 ---
 

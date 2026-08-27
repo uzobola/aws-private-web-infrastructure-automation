@@ -6,7 +6,7 @@ Deeper write-ups: [architecture.md](architecture.md), [security-model.md](securi
 
 ## Project Summary
 
-Tech Challenge 3 is a two-AZ AWS web architecture provisioned with Terraform and configured with Ansible.
+This project is a two-AZ AWS web architecture provisioned with Terraform and configured with Ansible.
 
 The application runs on private EC2 instances behind an internet-facing Application Load Balancer. The instances have no public IP addresses and expose no SSH access.
 
@@ -622,6 +622,6 @@ If asked what I would change for production, I would discuss:
 - customer-managed KMS where data classification requires it
 - autoscaling if workload demand requires it
 
-Those are production extensions, not requirements for the current challenge.
+Those are production extensions, not requirements for the current project.
 
 The project intentionally stays small enough that every component has a defendable purpose.

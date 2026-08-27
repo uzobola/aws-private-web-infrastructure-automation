@@ -353,7 +353,7 @@ Final scan evidence: [docs/evidence/security/checkov-final-scan.png](evidence/se
 | S3 notifications | Not applicable | No event consumer exists |
 | S3 versioning | Intentional exception | Deleted Ansible transfer payloads should not remain as historical versions |
 | Cross-region S3 replication | Not applicable | Bucket contains temporary transfer data |
-| WAF | Accepted | Static short-lived challenge application |
+| WAF | Accepted | Static short-lived application |
 | Explicit EBS optimization | Tool/context mismatch | `t3.micro` is EBS-optimized by default; explicit Terraform change forced EC2 replacement without improving effective runtime state |
 
 ---

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Tech Challenge 3 deploys a two-AZ AWS web architecture using Terraform for infrastructure provisioning and Ansible for host configuration.
+This project deploys a two-AZ AWS web architecture using Terraform for infrastructure provisioning and Ansible for host configuration.
 
 The public application boundary is an Application Load Balancer. The nginx web servers run on EC2 instances in private subnets with no public IPv4 addresses.
 
@@ -375,7 +375,7 @@ A production design requiring independent AZ egress would use a NAT Gateway per 
 
 ### No WAF
 
-The application is a temporary static challenge page.
+The application is a temporary static page.
 
 A production internet-facing application may place AWS WAF in front of the ALB based on threat model and application requirements.
 

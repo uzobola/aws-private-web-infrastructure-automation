@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document describes the deployment procedure used for Tech Challenge 3.
+This document describes the deployment procedure used for this project.
 
 The development workstation uses:
 
