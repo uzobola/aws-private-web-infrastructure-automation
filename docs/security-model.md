@@ -329,32 +329,50 @@ Controls were placed into four categories:
 
 Final scan evidence: [docs/evidence/security/checkov-final-scan.png](evidence/security/checkov-final-scan.png)
 
-### Checkov decisions
+## Checkov Findings Register
 
-| Control | Decision | Rationale |
+Final scan:
+
+- **132 passed**
+- **17 failed**
+- **0 skipped**
+- **16 distinct remaining controls**
+
+17 failed checks map to 16 distinct controls; `CKV_AWS_135` fires once per instance.
+
+The remaining findings were reviewed against the deployed architecture rather than treated as automatic remediation requirements.
+
+| Finding | Status | Decision |
 | --- | --- | --- |
-| ALB invalid-header handling | Remediated | Low-cost ALB hardening |
-| EC2 detailed monitoring | Remediated | Useful host monitoring signal |
-| ALB unrestricted egress | Remediated | Limited to application traffic |
-| EC2 unrestricted egress | Remediated | Limited to required HTTP/HTTPS paths |
-| S3 lifecycle cleanup | Remediated | Temporary transfer data expires quickly |
-| Incomplete multipart uploads | Remediated | Interrupted transfers are cleaned after one day |
-| Public subnet automatic public IP | Remediated | Public routing does not require automatic EC2 public IP assignment |
-| VPC Flow Logs | Remediated | Network activity is recorded |
-| Default security group | Remediated | Default SG explicitly locked down |
-| ALB access logging | Accepted | Extra logging bucket not justified for this short lab |
-| ALB deletion protection | Accepted | Conflicts with planned teardown |
-| HTTPS / TLS | Accepted | No registered domain or ACM certificate in this lab |
-| Backend HTTP | Accepted | ALB-to-EC2 traffic constrained by security groups |
-| Public ALB port 80 | Accepted | Intentional public application entry point |
-| CloudWatch CMK | Accepted | AWS-managed encryption used for short-lived lab logs |
-| One-year log retention | Accepted | Short retention fits temporary lab traffic |
-| S3 CMK | Accepted | SSE-S3 selected for transient transfer data |
-| S3 notifications | Not applicable | No event consumer exists |
-| S3 versioning | Intentional exception | Deleted Ansible transfer payloads should not remain as historical versions |
-| Cross-region S3 replication | Not applicable | Bucket contains temporary transfer data |
-| WAF | Accepted | Static short-lived application |
-| Explicit EBS optimization | Tool/context mismatch | `t3.micro` is EBS-optimized by default; explicit Terraform change forced EC2 replacement without improving effective runtime state |
+| `CKV_AWS_91` ALB access logging | Accepted for lab | ALB access logging would require a dedicated logging bucket and extra configuration beyond this short-lived lab |
+| `CKV_AWS_150` ALB deletion protection | Accepted for lab | Disabled intentionally so the environment can be destroyed cleanly |
+| `CKV_AWS_2` ALB listener not HTTPS | Accepted for lab | No registered domain or ACM certificate; production would terminate TLS at the ALB |
+| `CKV_AWS_135` EC2 EBS optimization | Tool/context mismatch | Both `t3.micro` instances are EBS-optimized by default; explicitly setting the property caused Terraform to propose instance replacement without changing effective runtime behavior |
+| `CKV_AWS_158` CloudWatch Logs KMS encryption | Accepted for lab | AWS-managed encryption selected for short-lived lab logs rather than a customer-managed KMS key |
+| `CKV_AWS_338` CloudWatch retention below one year | Accepted for lab | 14-day retention fits the temporary environment and avoids retaining lab network telemetry unnecessarily |
+| `CKV_AWS_260` public ingress to port 80 | Intended design | Applies to the internet-facing ALB security group; EC2 instances remain private and accept HTTP only from the ALB security group |
+| `CKV_AWS_145` S3 KMS encryption | Accepted for lab | SSE-S3 selected for temporary Ansible transfer data |
+| `CKV2_AWS_20` ALB does not redirect HTTP to HTTPS | Accepted for lab | HTTPS is not configured in this domain-less lab |
+| `CKV_AWS_378` ALB-to-target HTTP | Accepted for lab | Backend HTTP is restricted to the ALB-to-EC2 security-group path |
+| `CKV_AWS_103` TLS policy | Accepted for lab | No HTTPS listener exists in the current lab architecture |
+| `CKV_AWS_18` S3 access logging | Accepted for lab | Transfer bucket contains short-lived automation artifacts; separate S3 access-logging infrastructure was not added |
+| `CKV_AWS_21` S3 versioning | Intentional exception | Versioning is suspended so deleted temporary Ansible payloads do not remain as historical object versions |
+| `CKV2_AWS_62` S3 event notifications | Not applicable | The transfer bucket has no event-driven consumer |
+| `CKV_AWS_144` S3 cross-region replication | Not applicable | Bucket contains transient automation-transfer data rather than durable application data |
+| `CKV2_AWS_28` WAF on public ALB | Accepted for lab | Static short-lived application; WAF would be considered for a production internet-facing workload |
+
+### Remediations completed before the final scan
+
+The final architecture already incorporated several Checkov-driven hardening changes:
+
+- VPC Flow Logs enabled
+- default VPC security group locked down
+- ALB invalid-header dropping enabled
+- EC2 detailed monitoring enabled
+- public-subnet automatic public-IP assignment disabled
+- ALB and EC2 egress narrowed
+- S3 lifecycle expiration added
+- incomplete multipart uploads cleaned after one day
 
 ---
 

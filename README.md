@@ -172,6 +172,50 @@ Outbound traffic from the private subnets uses a NAT Gateway. The project uses o
         └── teardown/
 ```
 
+## Code Map
+
+### Terraform
+
+| File | Responsibility |
+| --- | --- |
+| `terraform/provider.tf` | AWS provider, version constraints, and default tags (`Project`, `ManagedBy`, `Environment`) |
+| `terraform/variables.tf` | Region, project name, VPC CIDR, and environment |
+| `terraform/vpc.tf` | VPC, public/private subnets, Internet Gateway, single NAT Gateway, and route tables |
+| `terraform/security-group.tf` | ALB public HTTP ingress; EC2 HTTP only from the ALB SG; scoped egress |
+| `terraform/alb.tf` | Internet-facing ALB, target group, listener, and health checks |
+| `terraform/ec2.tf` | Two private instances, IMDSv2, encrypted root volumes, detailed monitoring, and no public IPs |
+| `terraform/iam.tf` | EC2 instance role/profile for SSM and Ansible execution role trust + permissions |
+| `terraform/s3.tf` | Private Ansible/SSM transfer bucket: encryption, public-access block, and lifecycle cleanup |
+| `terraform/endpoints.tf` | S3 Gateway VPC endpoint associated with the private route table |
+| `terraform/security-baseline.tf` | VPC Flow Logs, Flow Logs IAM role, CloudWatch log group, and default-SG deny-all |
+| `terraform/outputs.tf` | `alb_dns_name`, `web_bucket_name`, VPC ID, and subnet IDs |
+
+The Terraform **execution identity** (`TerraformExecutionRole`) is not provisioned by this repository. It is a pre-existing role assumed from the workstation through AWS Vault and MFA.
+
+### Ansible
+
+| File | Responsibility |
+| --- | --- |
+| `ansible/ansible.cfg` | Inventory configuration, SSM connection defaults, and Python interpreter settings |
+| `ansible/aws_ec2.yml` | Dynamic inventory by `Project` tag and SSM connection |
+| `ansible/group_vars/all.yml` | SSM region and transfer-bucket settings |
+| `ansible/playbook.yml` | Idempotent nginx installation, template rendering, and service state |
+| `ansible/templates/index.html.j2` | Per-host page showing server number, Availability Zone, and instance ID |
+| `ansible/requirements.yml` | Pinned `amazon.aws` collection |
+| `ansible/requirements.txt` | Pinned `boto3` and `botocore` dependencies |
+
+### Scripts and Documentation
+
+| File | Responsibility |
+| --- | --- |
+| `scripts/init-ansible-env.sh` | WSL helper that verifies the Ansible AWS identity and loads deployment values from Terraform state |
+| `docs/architecture.md` | Traffic paths, Availability Zone layout, tool ownership boundaries, and architectural tradeoffs |
+| `docs/security-model.md` | IAM identities, trust boundaries, least privilege, negative tests, and Checkov decisions |
+| `docs/installation.md` | Reproducible Git Bash, AWS Vault, WSL, Terraform, and Ansible deployment procedure |
+| `docs/cleanup.md` | Terraform teardown, billable-resource checks, and project identity cleanup |
+
+---
+
 ## Terraform Responsibilities
 
 Terraform owns the AWS infrastructure lifecycle.
@@ -394,39 +438,13 @@ See [`docs/evidence/`](docs/evidence/) for captured validation evidence.
 
 ## Checkov Security Scan
 
-Terraform was scanned using Checkov.
+Terraform was assessed with Checkov.
 
-The purpose of the scan was control assessment rather than forcing every scanner recommendation into the architecture.
+**Final scan:** 132 passed, 17 failed, 0 skipped.
 
-Findings were classified as:
+The remaining findings were reviewed individually and classified as accepted lab risk, intentional design, tool/context mismatch, or not applicable. Several earlier findings led directly to infrastructure hardening, including VPC Flow Logs, default-security-group lockdown, restricted egress, EC2 detailed monitoring, ALB invalid-header handling, and S3 transfer lifecycle controls.
 
-- remediated
-- accepted with rationale
-- workload-context mismatch
-- not applicable
-
-Examples of remediated controls include:
-
-- public subnet automatic public-IP assignment
-- ALB invalid-header handling
-- EC2 detailed monitoring
-- unrestricted security-group egress
-- S3 lifecycle cleanup
-- incomplete multipart-upload cleanup
-- VPC Flow Logs
-- default security-group lockdown
-
-Examples of documented exceptions include:
-
-- HTTPS/TLS without a registered domain or ACM certificate
-- WAF for a temporary static lab
-- customer-managed KMS keys
-- cross-region replication for temporary transfer data
-- one-year Flow Log retention
-- ALB deletion protection in an environment built for teardown
-- explicit EBS optimization on `t3.micro`, which AWS provides by default and Terraform would replace the live instances to set explicitly
-
-The final scan evidence is stored at [`docs/evidence/security/checkov-final-scan.png`](docs/evidence/security/checkov-final-scan.png).
+See [`docs/security-model.md`](docs/security-model.md) for the full findings register and decision rationale. Final scan evidence: [`docs/evidence/security/checkov-final-scan.png`](docs/evidence/security/checkov-final-scan.png).
 
 ---
 

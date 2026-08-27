@@ -14,6 +14,8 @@ Identity, IAM, and scanner exceptions are documented in [security-model.md](secu
 
 ## Architecture Diagram
 
+![Architecture diagram](evidence/infrastructure/architecture-diagram.png)
+
 ```mermaid
 flowchart TB
     USER[Internet User]
