@@ -1,10 +1,8 @@
 # Private Multi-AZ AWS Web Infrastructure Automation
 
-Public ALB, private EC2 compute, Terraform provisioning, Ansible configuration, and SSM-based administration.
+Public ALB, private EC2, Terraform, Ansible, and SSM instead of SSH.
 
-A security-focused AWS infrastructure project that deploys a public web entry point over a private, two-AZ compute tier. Terraform provisions the AWS infrastructure, while Ansible dynamically discovers and configures the EC2 instances through AWS Systems Manager without SSH.
-
-The design separates infrastructure, configuration, workload, and AWS service identities, and validates least privilege through both successful and deliberately denied operations.
+Provisioning, configuration, workload, and AWS service identities are separate. Least privilege is proven with allowed operations and deliberate denies.
 
 ## What This Project Demonstrates
 
@@ -28,9 +26,9 @@ The design separates infrastructure, configuration, workload, and AWS service id
 
 ## Architecture
 
-A fuller write-up is in [docs/architecture.md](docs/architecture.md). Identity and IAM are in [docs/security-model.md](docs/security-model.md). The documentation index is [docs/README.md](docs/README.md). Interview notes are in [docs/interview.md](docs/interview.md).
+A fuller write-up is in [docs/architecture.md](docs/architecture.md). Identity and IAM are in [docs/security-model.md](docs/security-model.md). The documentation index is [docs/README.md](docs/README.md).
 
-![Architecture diagram](screenshots/tech-challenge-3-architecture.png)
+![Architecture diagram](docs/evidence/infrastructure/architecture-diagram.png)
 
 ```text
                          Internet
@@ -135,8 +133,6 @@ Outbound traffic from the private subnets uses a NAT Gateway. The project uses o
 ```text
 .
 ├── README.md
-├── screenshots/
-│   └── tech-challenge-3-architecture.png
 ├── ansible/
 │   ├── ansible.cfg
 │   ├── aws_ec2.yml
@@ -166,12 +162,12 @@ Outbound traffic from the private subnets uses a NAT Gateway. The project uses o
     ├── architecture.md
     ├── security-model.md
     ├── installation.md
-    ├── interview.md
     ├── cleanup.md
     └── evidence/
         ├── ansible/
         ├── application/
         ├── infrastructure/
+        │   └── architecture-diagram.png
         ├── security/
         └── teardown/
 ```
