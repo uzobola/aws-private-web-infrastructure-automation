@@ -4,23 +4,32 @@ Public ALB, private EC2, Terraform, Ansible, and SSM instead of SSH.
 
 Provisioning, configuration, workload, and AWS service identities are separate. Least privilege is proven with allowed operations and deliberate denies.
 
-## What This Project Demonstrates
+## At a Glance
 
-- Infrastructure provisioning with Terraform
-- Configuration management with Ansible
-- Dynamic EC2 inventory using AWS tags
-- Private EC2 compute across two Availability Zones
-- Application Load Balancer as the public entry point
-- AWS Systems Manager instead of SSH
-- Separate Terraform and Ansible execution identities
-- Least-privilege IAM design
-- Temporary STS credentials through AWS Vault and MFA
-- S3 used strictly as the Ansible/SSM transfer bucket
-- VPC Flow Logs to CloudWatch Logs
-- Checkov infrastructure-as-code scanning
-- Negative IAM tests proving denied actions
-- Ansible idempotence
-- Terraform-managed teardown
+- **Built:** A two-AZ private EC2/nginx web tier behind a public Application Load Balancer, provisioned with Terraform and configured with Ansible.
+- **Private by design:** EC2 instances have no public IP addresses and no inbound SSH rule; the ALB is the only public application entry point.
+- **Terraform owns:** VPC, subnets, routing, NAT, ALB, EC2, IAM, S3, VPC endpoints, security groups, and baseline logging/security controls.
+- **Ansible owns:** Dynamic EC2 discovery, nginx and host configuration, template rendering, and service state.
+- **Management plane:** Ansible manages the private instances through AWS Systems Manager rather than direct SSH connectivity.
+- **Identity separation:** Terraform, Ansible, EC2, and VPC Flow Logs use distinct AWS identities with different responsibilities.
+- **Least privilege:** The EC2 workload role has SSM managed-node permissions but no application S3 permission; the Ansible execution role has only the discovery, SSM, and transfer-bucket authority its workflow requires.
+- **Validation:** Multi-AZ traffic distribution, Ansible idempotence, denied IAM actions, VPC Flow Logs, and Checkov results are captured under `docs/evidence/`.
+
+```text
+TerraformExecutionRole
+        -> provisions and destroys AWS infrastructure
+
+challenge3-ansible-execution-role
+        -> discovers EC2, starts approved SSM sessions,
+           and operates the scoped S3 transfer bucket
+
+challenge3-web-instance-role
+        -> registers EC2 as an SSM managed node
+           no application S3 authority
+
+VPC Flow Logs service role
+        -> publishes network-flow records to CloudWatch Logs
+```
 
 ---
 
@@ -30,35 +39,13 @@ A fuller write-up is in [docs/architecture.md](docs/architecture.md). Identity a
 
 ![Architecture diagram](docs/evidence/infrastructure/architecture-diagram.png)
 
-```text
-                         Internet
-                            |
-                            v
-                  Application Load Balancer
-                    Public Subnets
-                     AZ-a / AZ-b
-                            |
-                  HTTP from ALB SG only
-                            |
-              +-------------+-------------+
-              |                           |
-              v                           v
-         EC2 Web 1                    EC2 Web 2
-       Private Subnet               Private Subnet
-           AZ-a                         AZ-b
-              |                           |
-              +-----------+---------------+
-                          |
-                    nginx application
-```
-
 ### Management / configuration path
 
 ```text
 AWS Vault + MFA
        |
        v
-Challenge3 Ansible Execution Role
+Ansible Execution Role
        |
        +--> EC2 dynamic inventory
        |
@@ -168,8 +155,7 @@ Outbound traffic from the private subnets uses a NAT Gateway. The project uses o
         ├── application/
         ├── infrastructure/
         │   └── architecture-diagram.png
-        ├── security/
-        └── teardown/
+        └── security/
 ```
 
 ## Code Map
@@ -301,7 +287,7 @@ challenge3-ansible-execution-role
       |
       +--> discover EC2
       +--> start approved SSM sessions
-      +--> use TC3 S3 transfer bucket
+      +--> use S3 transfer bucket
 ```
 
 ### EC2 workload identity
@@ -536,4 +522,3 @@ This project deliberately favors:
 - documented scanner exceptions over scanner-driven architecture
 - reproducible teardown as part of the resource lifecycle
 
-The result is a small Terraform + Ansible challenge implemented with security boundaries that can be explained, tested, and defended.

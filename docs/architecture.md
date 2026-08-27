@@ -16,53 +16,6 @@ Identity, IAM, and scanner exceptions are documented in [security-model.md](secu
 
 ![Architecture diagram](evidence/infrastructure/architecture-diagram.png)
 
-```mermaid
-flowchart TB
-    USER[Internet User]
-    ANSIBLE[Ansible controller]
-
-    subgraph AWS["AWS Account"]
-        IGW[Internet Gateway]
-
-        subgraph VPC["VPC"]
-            subgraph PUBLIC["Public Subnets - AZ A / AZ B"]
-                ALB[Application Load Balancer]
-                NAT[NAT Gateway]
-            end
-
-            subgraph PRIVATE["Private Subnets - AZ A / AZ B"]
-                EC2A["EC2 Web Server 1<br/>nginx<br/>No Public IP"]
-                EC2B["EC2 Web Server 2<br/>nginx<br/>No Public IP"]
-            end
-
-            S3EP[S3 Gateway VPC Endpoint]
-            FLOW[VPC Flow Logs]
-        end
-
-        S3[S3 Ansible Transfer Bucket]
-        SSM[AWS Systems Manager]
-        CW[CloudWatch Logs]
-    end
-
-    USER --> IGW
-    IGW --> ALB
-    ALB --> EC2A
-    ALB --> EC2B
-
-    EC2A --> NAT
-    EC2B --> NAT
-    NAT --> SSM
-
-    ANSIBLE --> S3
-    ANSIBLE --> SSM
-
-    EC2A --> S3EP
-    EC2B --> S3EP
-    S3EP --> S3
-
-    FLOW --> CW
-```
-
 There are no SSM interface VPC endpoints. Session Manager and other AWS APIs from the instances leave the private subnets through the NAT Gateway.
 
 ---
@@ -182,7 +135,7 @@ Ansible owns operating-system and application configuration.
 Ansible:
 
 - discovers EC2 instances through AWS dynamic inventory
-- selects the Challenge 3 instances from AWS tags
+- selects the project instances from AWS tags
 - connects through AWS Systems Manager
 - gathers EC2 metadata
 - installs nginx
@@ -222,23 +175,7 @@ The inventory can rediscover replacement EC2 instances when the Terraform-manage
 
 Administration does not use SSH.
 
-```text
-Ansible controller
-       |
-       | temporary AWS credentials
-       v
-Challenge3 Ansible Execution Role
-       |
-       v
-AWS Systems Manager
-       ^
-       |
-SSM Agent on EC2
-       |
-       | outbound via NAT
-       v
-NAT Gateway
-```
+The Ansible controller assumes the Ansible execution role with temporary credentials and reaches the instances through AWS Systems Manager. The SSM Agent on each instance has no inbound management path. It opens outbound sessions to SSM through the NAT Gateway.
 
 No inbound port 22 rule exists.
 
